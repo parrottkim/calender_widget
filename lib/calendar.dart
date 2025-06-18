@@ -39,20 +39,19 @@ class Calendar extends StatefulWidget {
 
   /// Private constructor to prevent direct instantiation.
   const Calendar._({
-    Key? key,
+    super.key,
     required SelectionMode mode,
     this.initialSelectedDate,
     this.initialStartDate,
     this.initialEndDate,
     this.onDateSelected,
     this.onDateRangeSelected,
-  }) : _mode = mode,
-       super(key: key);
+  }) : _mode = mode;
 
   /// Creates a calendar widget for single date selection.
   ///
   /// [initialSelectedDate] is the initially selected date.
-  /// [onDateSelected] is the callback triggered when a date is selected.
+  /// [onDateSelected] is the callback when a date is selected.
   factory Calendar.day({
     Key? key,
     DateTime? initialSelectedDate,
@@ -68,9 +67,9 @@ class Calendar extends StatefulWidget {
 
   /// Creates a calendar widget for date range selection.
   ///
-  /// [initialStartDate] is the initial start date of the range.
-  /// [initialEndDate] is the initial end date of the range.
-  /// [onDateRangeSelected] is the callback triggered when a date range is selected.
+  /// [initialStartDate] is the initially selected start date of the range.
+  /// [initialEndDate] is the initially selected end date of the range.
+  /// [onDateRangeSelected] is the callback when a date range is selected.
   factory Calendar.range({
     Key? key,
     DateTime? initialStartDate,
@@ -91,38 +90,24 @@ class Calendar extends StatefulWidget {
 }
 
 class _CalendarState extends State<Calendar> {
-  /// The currently focused month, year, or decade, determining the view.
   late DateTime _focusedDay;
-
-  /// The single selected day in [SelectionMode.day].
   DateTime? _selectedDay;
-
-  /// The start date of the selected range in [SelectionMode.range].
   DateTime? _rangeStart;
-
-  /// The end date of the selected range in [SelectionMode.range].
   DateTime? _rangeEnd;
-
-  /// The current active view mode of the calendar.
   late CalendarViewMode _currentViewMode;
 
-  // Defines the min and max years for PageController calculations to avoid infinite scroll.
+  // Page controllers for each view mode
+  late PageController _dayPageController;
+  late PageController _monthPageController;
+  late PageController _yearPageController;
+
+  // Min and max years for the calendar (adjust as needed)
   final int _minYear = 1900;
   final int _maxYear = 2100;
-
-  /// PageController for the day view (months).
-  late PageController _dayPageController;
-
-  /// PageController for the month view (years).
-  late PageController _monthPageController;
-
-  /// PageController for the year view (decades).
-  late PageController _yearPageController;
 
   @override
   void initState() {
     super.initState();
-    // Initialize focusedDay based on initial selection or current date
     _focusedDay =
         widget.initialSelectedDate ?? widget.initialStartDate ?? DateTime.now();
     _selectedDay = widget.initialSelectedDate;
@@ -130,10 +115,9 @@ class _CalendarState extends State<Calendar> {
     _rangeEnd = widget.initialEndDate;
     _currentViewMode = CalendarViewMode.day;
 
-    // Initialize all PageControllers
+    // PageController 초기화는 initState에서 이루어져야 합니다.
     _initializePageControllers();
 
-    // If an initial range is provided and start date is after end date, swap them.
     if (widget._mode == SelectionMode.range &&
         _rangeStart != null &&
         _rangeEnd != null &&
@@ -147,14 +131,14 @@ class _CalendarState extends State<Calendar> {
   @override
   void didUpdateWidget(covariant Calendar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Update internal state if initial selection properties change from parent
-    bool shouldUpdatePageControllers = false;
+
+    bool shouldUpdateFocusedDay = false;
 
     if (widget.initialSelectedDate != oldWidget.initialSelectedDate) {
       _selectedDay = widget.initialSelectedDate;
       if (widget.initialSelectedDate != null) {
         _focusedDay = widget.initialSelectedDate!;
-        shouldUpdatePageControllers = true;
+        shouldUpdateFocusedDay = true;
       }
     }
     if (widget.initialStartDate != oldWidget.initialStartDate ||
@@ -163,20 +147,19 @@ class _CalendarState extends State<Calendar> {
       _rangeEnd = widget.initialEndDate;
       if (widget.initialStartDate != null) {
         _focusedDay = widget.initialStartDate!;
-        shouldUpdatePageControllers = true;
+        shouldUpdateFocusedDay = true;
       }
     }
 
-    if (shouldUpdatePageControllers) {
-      // Only call setState if actual state changes happened
-      setState(() {
-        _updatePageControllers();
-      });
+    // 만약 _focusedDay가 변경되었다면, 다음 프레임에서 컨트롤러를 업데이트하도록 스케줄링합니다.
+    if (shouldUpdateFocusedDay) {
+      _schedulePageControllerUpdate();
     }
   }
 
   /// Initializes the PageControllers with their initial pages.
   void _initializePageControllers() {
+    // PageController 초기화 시에는 .page에 접근하지 않으므로 안전합니다.
     _dayPageController = PageController(
       initialPage: (_focusedDay.year - _minYear) * 12 + _focusedDay.month - 1,
     );
@@ -190,18 +173,16 @@ class _CalendarState extends State<Calendar> {
 
   /// Updates the PageControllers to animate to the correct page when `_focusedDay` changes.
   /// This should be called within setState or didUpdateWidget when _focusedDay is updated.
-  void _updatePageControllers({bool jumped = false}) {
+  /// Using addPostFrameCallback ensures the PageView has been built.
+  void _schedulePageControllerUpdate() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      void animateToPageIfNecessary(PageController controller, int targetPage) {
-        if (controller.hasClients && controller.page?.round() != targetPage) {
-          if (!jumped) {
-            controller.animateToPage(
+      void updateController(PageController controller, int targetPage) {
+        if (controller.hasClients) {
+          // Check if it's already on the target page to avoid unnecessary jumps/animations
+          if (controller.page?.round() != targetPage) {
+            controller.jumpToPage(
               targetPage,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
-          } else {
-            controller.jumpToPage(targetPage);
+            ); // Use jumpToPage for instant change
           }
         }
       }
@@ -209,13 +190,13 @@ class _CalendarState extends State<Calendar> {
       if (_currentViewMode == CalendarViewMode.day) {
         final int targetPage =
             (_focusedDay.year - _minYear) * 12 + _focusedDay.month - 1;
-        animateToPageIfNecessary(_dayPageController, targetPage);
+        updateController(_dayPageController, targetPage);
       } else if (_currentViewMode == CalendarViewMode.month) {
         final int targetPage = _focusedDay.year - _minYear;
-        animateToPageIfNecessary(_monthPageController, targetPage);
+        updateController(_monthPageController, targetPage);
       } else if (_currentViewMode == CalendarViewMode.year) {
         final int targetPage = (_focusedDay.year - _minYear) ~/ 10;
-        animateToPageIfNecessary(_yearPageController, targetPage);
+        updateController(_yearPageController, targetPage);
       }
     });
   }
@@ -226,6 +207,21 @@ class _CalendarState extends State<Calendar> {
     _monthPageController.dispose();
     _yearPageController.dispose();
     super.dispose();
+  }
+
+  /// Helper to check if two dates are the same day (ignoring time).
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  /// Helper to check if two dates are in the same month (ignoring day and time).
+  bool _isSameMonth(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month;
+  }
+
+  /// Helper to check if two dates are in the same year (ignoring month, day and time).
+  bool _isSameYear(DateTime a, DateTime b) {
+    return a.year == b.year;
   }
 
   /// Builds the calendar header displaying the current month/year/decade
@@ -243,9 +239,9 @@ class _CalendarState extends State<Calendar> {
         onHeaderTap = () {
           setState(() {
             _currentViewMode = CalendarViewMode.month;
-            _updatePageControllers(
-              jumped: true,
-            ); // View mode changed, update page controller
+            // 월 뷰로 갈 때는 년도만 유지하고 월은 1월로 설정 (월 뷰의 시작점을 명확히 하기 위함)
+            _focusedDay = DateTime(_focusedDay.year, 1, 1);
+            _schedulePageControllerUpdate(); // 다음 프레임에서 컨트롤러 업데이트 스케줄링
           });
         };
         onLeftArrowTap = () {
@@ -270,9 +266,9 @@ class _CalendarState extends State<Calendar> {
         onHeaderTap = () {
           setState(() {
             _currentViewMode = CalendarViewMode.year;
-            _updatePageControllers(
-              jumped: true,
-            ); // View mode changed, update page controller
+            // 년도 뷰로 갈 때는 10년 단위의 시작 년도로 설정
+            _focusedDay = DateTime((_focusedDay.year ~/ 10) * 10, 1, 1);
+            _schedulePageControllerUpdate(); // 다음 프레임에서 컨트롤러 업데이트 스케줄링
           });
         };
         onLeftArrowTap = () {
@@ -329,10 +325,6 @@ class _CalendarState extends State<Calendar> {
           InkWell(
             onTap: onHeaderTap,
             borderRadius: BorderRadius.circular(4.0),
-            highlightColor: Theme.of(
-              context,
-            ).colorScheme.primary.withOpacity(0.1),
-            splashColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: 8.0,
@@ -357,18 +349,18 @@ class _CalendarState extends State<Calendar> {
     );
   }
 
-  /// Builds the row displaying the days of the week (Sun, Mon, Tue, etc.).
+  /// Builds the row of weekday names (Sun, Mon, Tue, etc.).
   Widget _buildWeekDays() {
+    final currentLocale = Localizations.localeOf(context).languageCode;
+
     if (_currentViewMode != CalendarViewMode.day) {
-      return const SizedBox.shrink(); // Hide if not in day view
+      return const SizedBox.shrink(); // 일별 뷰가 아니면 숨김
     }
     final List<String> displayWeekDays = [];
 
     for (int i = 0; i < 7; i++) {
-      // Use an arbitrary date to get localized weekday names.
-      // January 7, 2024, is a Sunday (as a reference point).
       DateTime date = DateTime(2024, 1, 7).add(Duration(days: i));
-      displayWeekDays.add(DateFormat.E(Intl.getCurrentLocale()).format(date));
+      displayWeekDays.add(DateFormat.E(currentLocale).format(date));
     }
 
     return Row(
@@ -377,8 +369,8 @@ class _CalendarState extends State<Calendar> {
           displayWeekDays.map((day) {
             return Expanded(
               child: Container(
-                // Apply same margin as day cells for alignment
-                margin: const EdgeInsets.all(2.0),
+                // buildDaysGrid와 동일한 간격 적용을 위해 Container 추가
+                margin: const EdgeInsets.all(2.0), // buildDaysGrid의 셀과 동일한 마진
                 alignment: Alignment.center,
                 child: Text(
                   day,
@@ -393,18 +385,11 @@ class _CalendarState extends State<Calendar> {
     );
   }
 
-  /// Checks if two [DateTime] objects represent the same day, ignoring time.
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
   /// Handles the selection of a date based on the current [SelectionMode].
   void _onDaySelected(DateTime day) {
     setState(() {
-      // Animate the PageController to the selected month first, if it's a different month
-      final int targetPage = (_focusedDay.year - _minYear) * 12 + day.month - 1;
-      if (_dayPageController.hasClients &&
-          _dayPageController.page?.round() != targetPage) {
+      final int targetPage = (day.year - _minYear) * 12 + day.month - 1;
+      if (_dayPageController.hasClients) {
         _dayPageController.animateToPage(
           targetPage,
           duration: const Duration(milliseconds: 300),
@@ -417,13 +402,13 @@ class _CalendarState extends State<Calendar> {
         widget.onDateSelected?.call(day);
       } else if (widget._mode == SelectionMode.range) {
         if (_rangeStart == null || _rangeEnd != null) {
-          // Starting a new range or previous range selection is complete
+          // Start a new range or reset if a range was already completed
           _rangeStart = day;
-          _rangeEnd = null; // Reset end date
+          _rangeEnd = null;
         } else {
-          // Selecting the end date after start date is chosen
+          // If rangeStart exists, set rangeEnd
           if (day.isBefore(_rangeStart!)) {
-            // If selected day is before start day, swap them
+            // If selected day is before start, swap them
             _rangeEnd = _rangeStart;
             _rangeStart = day;
           } else {
@@ -436,13 +421,11 @@ class _CalendarState extends State<Calendar> {
           }
         }
       }
-      // After selection, update _focusedDay to the month of the selected day
-      // to keep the header in sync, ONLY if it's a different month.
+      // 선택된 날짜에 맞춰 _focusedDay 업데이트
       final newFocusedDay = DateTime(day.year, day.month, 1);
-      if (!_isSameDay(_focusedDay, newFocusedDay)) {
+      if (!_isSameMonth(_focusedDay, newFocusedDay)) {
+        // 월이 변경되었을 때만 업데이트
         _focusedDay = newFocusedDay;
-        // No need to call _updatePageControllers() here, as animateToPage is already called above
-        // and _focusedDay change itself will trigger a rebuild, and didUpdateWidget will handle it.
       }
     });
   }
@@ -540,7 +523,9 @@ class _CalendarState extends State<Calendar> {
                   borderRadius: const BorderRadius.horizontal(
                     left: Radius.circular(50.0),
                   ),
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.onPrimary;
               } else if (isRangeEnd) {
@@ -552,12 +537,16 @@ class _CalendarState extends State<Calendar> {
                   borderRadius: const BorderRadius.horizontal(
                     right: Radius.circular(50.0),
                   ),
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.onPrimary;
               } else if (isInRange) {
                 backgroundDecoration = BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.primary;
               }
@@ -600,9 +589,7 @@ class _CalendarState extends State<Calendar> {
                 setState(() {
                   _focusedDay = DateTime(year, 1, 1);
                   _currentViewMode = CalendarViewMode.month;
-                  _updatePageControllers(
-                    jumped: true,
-                  ); // View mode changed, update page controller
+                  _schedulePageControllerUpdate();
                 });
               },
               borderRadius: BorderRadius.circular(8.0),
@@ -745,7 +732,9 @@ class _CalendarState extends State<Calendar> {
                   borderRadius: const BorderRadius.horizontal(
                     left: Radius.circular(50.0),
                   ),
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.onPrimary;
               } else if (isRangeEnd) {
@@ -757,12 +746,16 @@ class _CalendarState extends State<Calendar> {
                   borderRadius: const BorderRadius.horizontal(
                     right: Radius.circular(50.0),
                   ),
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.onPrimary;
               } else if (isInRange) {
                 backgroundDecoration = BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.primary;
               }
@@ -805,9 +798,7 @@ class _CalendarState extends State<Calendar> {
                 setState(() {
                   _focusedDay = monthDate;
                   _currentViewMode = CalendarViewMode.day;
-                  _updatePageControllers(
-                    jumped: true,
-                  ); // View mode changed, update page controller
+                  _schedulePageControllerUpdate();
                 });
               },
               borderRadius: BorderRadius.circular(8.0),
@@ -959,7 +950,9 @@ class _CalendarState extends State<Calendar> {
             Color textColor =
                 isCurrentMonth
                     ? Theme.of(context).colorScheme.onSurface
-                    : Theme.of(context).colorScheme.onSurface.withOpacity(0.4);
+                    : Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.4);
 
             if (isToday) {
               todayDecoration = BoxDecoration(
@@ -1004,7 +997,7 @@ class _CalendarState extends State<Calendar> {
                     ),
                     color: Theme.of(
                       context,
-                    ).colorScheme.primary.withOpacity(0.1),
+                    ).colorScheme.primary.withValues(alpha: 0.1),
                   );
                 }
                 textColor = Theme.of(context).colorScheme.onPrimary;
@@ -1017,12 +1010,16 @@ class _CalendarState extends State<Calendar> {
                   borderRadius: const BorderRadius.horizontal(
                     right: Radius.circular(50.0),
                   ),
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.onPrimary;
               } else if (isInRange) {
                 backgroundDecoration = BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.1),
                 );
                 textColor = Theme.of(context).colorScheme.primary;
               }
@@ -1101,37 +1098,34 @@ class _CalendarState extends State<Calendar> {
   Widget build(BuildContext context) {
     // _updatePageControllers() is now only called when _focusedDay or _currentViewMode changes via setState
     // This removes the redundant scheduling in every build cycle.
-    return AspectRatio(
-      aspectRatio: 1.0,
-      child: Column(
-        children: [
-          _buildHeader(), // Calendar header (month/year display and navigation buttons)
-          _buildWeekDays(), // Weekday display (Sun, Mon, Tue, etc.)
-          Expanded(
-            child: AnimatedSwitcher(
-              // Animation for view mode transitions (day, month, year)
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(opacity: animation, child: child);
+    return Column(
+      children: [
+        _buildHeader(), // Calendar header (month/year display and navigation buttons)
+        _buildWeekDays(), // Weekday display (Sun, Mon, Tue, etc.)
+        Expanded(
+          child: AnimatedSwitcher(
+            // Animation for view mode transitions (day, month, year)
+            duration: const Duration(milliseconds: 300),
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            child: Builder(
+              // Display the appropriate grid widget based on the current view mode
+              key: ValueKey<CalendarViewMode>(_currentViewMode),
+              builder: (context) {
+                switch (_currentViewMode) {
+                  case CalendarViewMode.day:
+                    return _buildDaysGrid();
+                  case CalendarViewMode.month:
+                    return _buildMonthsGrid();
+                  case CalendarViewMode.year:
+                    return _buildYearsGrid();
+                }
               },
-              child: Builder(
-                // Display the appropriate grid widget based on the current view mode
-                key: ValueKey<CalendarViewMode>(_currentViewMode),
-                builder: (context) {
-                  switch (_currentViewMode) {
-                    case CalendarViewMode.day:
-                      return _buildDaysGrid();
-                    case CalendarViewMode.month:
-                      return _buildMonthsGrid();
-                    case CalendarViewMode.year:
-                      return _buildYearsGrid();
-                  }
-                },
-              ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
